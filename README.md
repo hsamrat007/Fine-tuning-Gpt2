@@ -4,7 +4,7 @@
 [![Python 3.7+](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/release/python-370/)
 [![HuggingFace](https://img.shields.io/badge/🤗-Hugging%20Face-yellow)](https://huggingface.co/)
 
-This repository contains code and resources for fine-tuning a GPT-2 model on medical data using advanced techniques such as PEFT (Parameter-Efficient Fine-Tuning) and QLoRA (Quantized Low-Rank Adaptation). The model is designed to generate healthcare-related text based on the [medalpaca/medical_meadow_wikidoc_patient_information](https://huggingface.co/datasets/medalpaca/medical_meadow_wikidoc_patient_information) dataset.
+This repository demonstrates the fine-tuning of a GPT-2 model on medical data using advanced techniques such as PEFT (Parameter-Efficient Fine-Tuning) and QLoRA (Quantized Low-Rank Adaptation). The model is designed to generate healthcare-related text based on the [medalpaca/medical_meadow_wikidoc_patient_information](https://huggingface.co/datasets/medalpaca/medical_meadow_wikidoc_patient_information) dataset.
 
 ## Table of Contents
 
@@ -13,9 +13,6 @@ This repository contains code and resources for fine-tuning a GPT-2 model on med
 - [Dataset](#dataset)
 - [Techniques Used](#techniques-used)
 - [Usage](#usage)
-  - [Training the Model](#training-the-model)
-  - [Inference](#inference)
-- [Project Structure](#project-structure)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -24,7 +21,7 @@ This repository contains code and resources for fine-tuning a GPT-2 model on med
 - Fine-tune GPT-2 on medical data using PEFT and QLoRA
 - Efficient training with reduced memory footprint
 - Generate healthcare-related text
-- Easy-to-use training and inference scripts
+- Utilizes Hugging Face's Transformers and Datasets libraries
 
 ## Installation
 
@@ -42,7 +39,8 @@ This repository contains code and resources for fine-tuning a GPT-2 model on med
 
 3. Install the required dependencies:
    ```
-   pip install -r requirements.txt
+   pip install peft bitsandbytes transformers accelerate trl
+   pip install --upgrade pyarrow
    ```
 
 ## Dataset
@@ -68,61 +66,70 @@ We employ the Trainer API to handle the fine-tuning process, simplifying the tra
 
 ## Usage
 
-### Training the Model
+To use this project, you'll need to create Python scripts or Jupyter notebooks that implement the fine-tuning process and inference. Here's a general outline of the steps involved:
 
-To train the model, run the following command:
+1. Load the dataset:
+   ```python
+   from datasets import load_dataset
+   
+   dataset = load_dataset("medalpaca/medical_meadow_wikidoc_patient_information")
+   ```
 
-```
-python train.py --model_name "openai-community/gpt2" --output_dir "./healthcare_gpt2model" --num_train_epochs 3
-```
+2. Prepare the model and tokenizer:
+   ```python
+   from transformers import AutoTokenizer, AutoModelForCausalLM
+   from peft import prepare_model_for_kbit_training, LoraConfig, get_peft_model
 
-You can customize training parameters by modifying the `train.py` script or passing command-line arguments.
+   model_name = "openai-community/gpt2"
+   tokenizer = AutoTokenizer.from_pretrained(model_name)
+   model = AutoModelForCausalLM.from_pretrained(model_name, load_in_4bit=True)
+   ```
 
-### Inference
+3. Configure and apply PEFT:
+   ```python
+   peft_config = LoraConfig(
+       r=16,
+       lora_alpha=32,
+       target_modules=["q_proj", "v_proj"],
+       lora_dropout=0.05,
+       bias="none",
+       task_type="CAUSAL_LM"
+   )
+   model = prepare_model_for_kbit_training(model)
+   model = get_peft_model(model, peft_config)
+   ```
 
-To generate text using the fine-tuned model:
+4. Set up the Trainer and train the model:
+   ```python
+   from transformers import Trainer, TrainingArguments
 
-```python
-from inference import load_model, generate_response
+   training_args = TrainingArguments(
+       output_dir="./results",
+       num_train_epochs=3,
+       per_device_train_batch_size=4,
+       save_steps=1000,
+       save_total_limit=2,
+   )
 
-model, tokenizer = load_model("./healthcare_gpt2model")
-input_text = "Patient symptoms include fever and cough."
-generated_text = generate_response(model, tokenizer, input_text)
-print(generated_text)
-```
+   trainer = Trainer(
+       model=model,
+       args=training_args,
+       train_dataset=dataset["train"],
+   )
 
-## Project Structure
+   trainer.train()
+   ```
 
-```
-healthcare-gpt2-finetuning/
-├── data/
-│   └── process_data.py
-├── models/
-│   ├── model.py
-│   └── utils.py
-├── train.py
-├── inference.py
-├── requirements.txt
-├── README.md
-└── LICENSE
-```
+5. Save the fine-tuned model:
+   ```python
+   model.save_pretrained("./healthcare_gpt2model")
+   ```
 
-## Contributing
+6. For inference, load the model and generate text:
+   ```python
+   from transformers import pipeline
 
-Contributions are welcome! Please follow these steps:
-
-1. Fork the repository
-2. Create a new branch: `git checkout -b feature-branch-name`
-3. Make your changes and commit them: `git commit -m 'Add some feature'`
-4. Push to the branch: `git push origin feature-branch-name`
-5. Submit a pull request
-
-Please ensure your code adheres to the project's coding standards and include tests for new features.
-
-## License
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
-
----
-
-For more information or support, please open an issue or contact the repository maintainers.
+   generator = pipeline('text-generation', model="./healthcare_gpt2model")
+   response = generator("Patient symptoms include fever and cough.", max_length=100)
+   print(response[0]['generated_text'])
+   ```
